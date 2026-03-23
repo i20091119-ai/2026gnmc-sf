@@ -1,0 +1,101 @@
+name: Submit Survey Response
+
+on:
+  workflow_dispatch:
+    inputs:
+      data:
+        description: 'Survey response JSON'
+        required: true
+        type: string
+
+jobs:
+  save-to-sheets:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write to Google Sheets
+        run: |
+          python3 << 'EOF'
+          import json
+          import os
+          import sys
+          from datetime import datetime
+
+          # ---- Google Sheets API (서비스 계정) ----
+          # 필요 라이브러리 설치
+          import subprocess
+          subprocess.run([sys.executable, '-m', 'pip', 'install', 'google-auth', 'google-api-python-client'], check=True, capture_output=True)
+
+          from google.oauth2 import service_account
+          from googleapiclient.discovery import build
+
+          # GitHub Secret에서 서비스 계정 JSON 로드
+          SERVICE_ACCOUNT_INFO = json.loads(os.environ['GOOGLE_SERVICE_ACCOUNT_JSON'])
+          SPREADSHEET_ID = '1FUUPQWtPWl8UxJf2rpT7Oi--qcYBK4JWCFuyXBCwyKk'
+          SHEET_NAME = 'Sheet1'
+
+          # 인증
+          creds = service_account.Credentials.from_service_account_info(
+              SERVICE_ACCOUNT_INFO,
+              scopes=['https://www.googleapis.com/auth/spreadsheets']
+          )
+          service = build('sheets', 'v4', credentials=creds)
+
+          # 제출 데이터 파싱
+          raw = os.environ['SURVEY_DATA']
+          data = json.loads(raw)
+
+          # 헤더가 없으면 첫 행에 추가
+          sheet = service.spreadsheets()
+          result = sheet.values().get(
+              spreadsheetId=SPREADSHEET_ID,
+              range=f'{SHEET_NAME}!A1:A1'
+          ).execute()
+          values = result.get('values', [])
+
+          if not values:
+              header = [[
+                  '제출시각', '참여프로그램', '설문자유형',
+                  '운영1_흥미', '운영2_구성', '운영3_수학흥미',
+                  '운영4_재참여', '운영5_강사',
+                  '시설1_청결', '시설2_안전', '시설3_환경', '시설4_응대',
+                  '주관1_기억활동', '주관2_강사의견', '주관3_시설의견'
+              ]]
+              sheet.values().append(
+                  spreadsheetId=SPREADSHEET_ID,
+                  range=f'{SHEET_NAME}!A1',
+                  valueInputOption='RAW',
+                  body={'values': header}
+              ).execute()
+
+          # 응답 행 추가
+          row = [[
+              data.get('timestamp', ''),
+              data.get('program', ''),
+              data.get('respondent', ''),
+              data.get('op1', ''),
+              data.get('op2', ''),
+              data.get('op3', ''),
+              data.get('op4', ''),
+              data.get('op5', ''),
+              data.get('fa1', ''),
+              data.get('fa2', ''),
+              data.get('fa3', ''),
+              data.get('fa4', ''),
+              data.get('free1', ''),
+              data.get('free2', ''),
+              data.get('free3', ''),
+          ]]
+
+          sheet.values().append(
+              spreadsheetId=SPREADSHEET_ID,
+              range=f'{SHEET_NAME}!A1',
+              valueInputOption='RAW',
+              insertDataOption='INSERT_ROWS',
+              body={'values': row}
+          ).execute()
+
+          print("✅ 응답 저장 완료:", data.get('timestamp', ''))
+          EOF
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SURVEY_DATA: ${{ inputs.data }}
